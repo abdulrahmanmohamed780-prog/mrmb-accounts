@@ -40,10 +40,12 @@ button.del{color:var(--red);border-color:transparent;background:transparent;padd
 .stat.big{grid-column:1/-1;border:1px solid var(--gold)}
 .empty{color:var(--mute);text-align:center;padding:14px 0;font-size:14px}
 nav{position:fixed;bottom:0;left:0;right:0;background:#0e0b08;border-top:1px solid var(--line);display:flex;padding-bottom:env(safe-area-inset-bottom)}
-nav button{flex:1;border:0;border-radius:0;background:transparent;color:var(--mute);padding:12px 2px;font-size:12px}
+nav button{flex:1;border:0;border-radius:0;background:transparent;color:var(--mute);padding:15px 2px;font-size:15px;font-weight:700}
 nav button.on{color:var(--gold2);box-shadow:inset 0 3px 0 var(--gold)}
 #toast{position:fixed;bottom:96px;left:50%;transform:translateX(-50%);background:var(--gold);color:#1a120a;padding:9px 16px;border-radius:20px;font-weight:700;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90%}
 #toast.show{opacity:1}
+summary{font-size:18px;color:var(--gold2);font-weight:700;cursor:pointer;padding:4px 0}
+details[open]>summary{margin-bottom:6px}
 section{display:none}section.on{display:block}
 </style>
 </head>
@@ -53,10 +55,11 @@ section{display:none}section.on{display:block}
 
 <section id="t-day" class="on">
   <div class="card">
-    <label>التاريخ</label><input type="date" id="dayDate">
+    <label>تاريخ اليوم اللي بتسجله</label><input type="date" id="dayDate">
   </div>
-  <div class="card">
-    <h2>بيع جديد</h2>
+
+  <details class="card" open>
+    <summary>بيع</summary>
     <label>الصنف</label><select id="sItem"></select>
     <div class="hint" id="sStock"></div>
     <div class="row">
@@ -65,16 +68,34 @@ section{display:none}section.on{display:block}
     </div>
     <div class="quick" id="sQuick"></div>
     <button class="main" onclick="uiAddSale()">تسجيل البيع</button>
-  </div>
-  <div class="card">
-    <h2>مبيعات اليوم</h2>
+    <h3>مبيعات اليوم</h3>
     <div id="dayList"></div>
-  </div>
-</section>
+  </details>
 
-<section id="t-stock">
-  <div class="card">
-    <h2 id="iTitle">صنف جديد</h2>
+  <details class="card">
+    <summary>شراء بضاعة (يزوّد المخزون)</summary>
+    <label>الصنف</label><select id="pItem"></select>
+    <div class="row">
+      <div><label id="pQtyL">الكمية (كيلو)</label><input id="pQty" inputmode="decimal"></div>
+      <div><label>إجمالي المدفوع (جنيه)</label><input id="pTotal" inputmode="decimal"></div>
+    </div>
+    <button class="main" onclick="uiAddPurchase()">تسجيل الشراء</button>
+    <h3>آخر المشتريات</h3>
+    <div id="buyList"></div>
+  </details>
+
+  <details class="card">
+    <summary>مصروف</summary>
+    <label>البيان</label><input id="eNote" list="eNotes" autocomplete="off">
+    <datalist id="eNotes"><option>إيجار</option><option>كهرباء</option><option>مرتبات</option><option>أكياس وتعبئة</option><option>نقل</option><option>صيانة</option></datalist>
+    <label>المبلغ (جنيه)</label><input id="eAmt" inputmode="decimal">
+    <button class="main" onclick="uiAddExpense()">تسجيل المصروف</button>
+    <h3>آخر المصروفات</h3>
+    <div id="expList"></div>
+  </details>
+
+  <details class="card" id="dItem">
+    <summary id="iTitle">صنف جديد</summary>
     <input type="hidden" id="iId">
     <label>اسم الصنف</label><input id="iName" autocomplete="off">
     <div class="row">
@@ -88,39 +109,12 @@ section{display:none}section.on{display:block}
     <label>نبّهني لما الرصيد يقل عن</label><input id="iLow" inputmode="decimal">
     <button class="main" onclick="uiSaveItem()">حفظ الصنف</button>
     <button id="iCancel" style="display:none;width:100%;margin-top:8px" onclick="uiResetItem()">إلغاء التعديل</button>
-  </div>
-  <div class="card"><h2>المخزون</h2><div id="stockList"></div></div>
-</section>
-
-<section id="t-buy">
-  <div class="card">
-    <h2>شراء (يزوّد المخزون)</h2>
-    <label>التاريخ</label><input type="date" id="pDate">
-    <label>الصنف</label><select id="pItem"></select>
-    <div class="row">
-      <div><label id="pQtyL">الكمية (كيلو)</label><input id="pQty" inputmode="decimal"></div>
-      <div><label>إجمالي المدفوع (جنيه)</label><input id="pTotal" inputmode="decimal"></div>
-    </div>
-    <button class="main" onclick="uiAddPurchase()">تسجيل الشراء</button>
-  </div>
-  <div class="card"><h2>آخر المشتريات</h2><div id="buyList"></div></div>
-</section>
-
-<section id="t-exp">
-  <div class="card">
-    <h2>مصروف جديد</h2>
-    <label>التاريخ</label><input type="date" id="eDate">
-    <label>البيان</label><input id="eNote" list="eNotes" autocomplete="off">
-    <datalist id="eNotes"><option>إيجار</option><option>كهرباء</option><option>مرتبات</option><option>أكياس وتعبئة</option><option>نقل</option><option>صيانة</option></datalist>
-    <label>المبلغ (جنيه)</label><input id="eAmt" inputmode="decimal">
-    <button class="main" onclick="uiAddExpense()">تسجيل المصروف</button>
-  </div>
-  <div class="card"><h2>آخر المصروفات</h2><div id="expList"></div></div>
+  </details>
 </section>
 
 <section id="t-rep">
   <div class="card">
-    <h2>التقارير</h2>
+    <h2>التقرير</h2>
     <select id="rRange" onchange="renderReport()">
       <option value="today">اليوم</option><option value="7">آخر 7 أيام</option>
       <option value="month" selected>الشهر الحالي</option><option value="prev">الشهر اللي فات</option>
@@ -130,37 +124,27 @@ section{display:none}section.on{display:block}
       <div><label>من</label><input type="date" id="rFrom" onchange="renderReport()"></div>
       <div><label>إلى</label><input type="date" id="rTo" onchange="renderReport()"></div>
     </div>
+    <div class="stats" id="rStats" style="margin-top:12px"></div>
   </div>
-  <div class="card"><div class="stats" id="rStats"></div></div>
+  <div class="card"><h2>المخزون</h2><div id="stockList"></div></div>
   <div class="card"><h2>الأصناف الأكثر مبيعًا</h2><div id="rTop"></div></div>
-</section>
-
-<section id="t-bak">
-  <div class="card">
-    <h2>النسخة الاحتياطية</h2>
+  <details class="card">
+    <summary>النسخة الاحتياطية</summary>
     <div class="hint" id="bInfo"></div>
     <button class="main" onclick="uiBackup()">حفظ نسخة احتياطية</button>
     <div class="hint">البيانات محفوظة على الجهاز ده بس. احفظ نسخة كل أسبوع وابعتها لنفسك على واتساب أو الإيميل.</div>
-  </div>
-  <div class="card">
     <h3>استرجاع نسخة</h3>
     <input type="file" id="bFile" accept=".json,application/json">
     <button style="width:100%;margin-top:8px" onclick="uiRestore()">استرجاع (يستبدل البيانات الحالية)</button>
-  </div>
-  <div class="card">
     <h3>تصدير لإكسل</h3>
     <button style="width:100%" onclick="uiCsv()">تنزيل كل المبيعات (CSV)</button>
-  </div>
+  </details>
 </section>
 
 </main>
 <nav>
-  <button data-t="day" class="on">اليومية</button>
-  <button data-t="stock">المخزون</button>
-  <button data-t="buy">مشتريات</button>
-  <button data-t="exp">مصروفات</button>
-  <button data-t="rep">تقارير</button>
-  <button data-t="bak">نسخة</button>
+  <button data-t="day" class="on">التسجيل</button>
+  <button data-t="rep">التقرير والمخزون</button>
 </nav>
 <div id="toast"></div>
 
@@ -266,13 +250,13 @@ window.uiSaveItem=function(){
   if(r.err)return toast(r.err);toast('اتحفظ');uiResetItem();renderAll()};
 window.uiResetItem=function(){['iId','iName','iPrice','iStock','iCost','iLow'].forEach(function(k){$(k).value=''});$('iUnit').value='kg';$('iTitle').textContent='صنف جديد';$('iCancel').style.display='none'};
 window.uiEditItem=function(id){var it=item(id);if(!it)return;$('iId').value=it.id;$('iName').value=it.name;$('iUnit').value=it.unit;$('iPrice').value=it.price;$('iStock').value=it.stock;$('iCost').value=it.cost;$('iLow').value=it.low||'';
-  $('iTitle').textContent='تعديل: '+it.name;$('iCancel').style.display='block';window.scrollTo(0,0)};
+  $('iTitle').textContent='تعديل: '+it.name;$('iCancel').style.display='block';showTab('day');$('dItem').open=true;$('dItem').scrollIntoView()};
 window.uiDelItem=function(id){if(!confirm('حذف الصنف؟ المبيعات القديمة هتفضل في التقارير.'))return;
   db.items=db.items.filter(function(i){return i.id!==id});save();renderAll()};
 
-window.uiAddPurchase=function(){var r=addPurchase($('pDate').value,$('pItem').value,$('pQty').value,$('pTotal').value);
+window.uiAddPurchase=function(){var r=addPurchase($('dayDate').value||today(),$('pItem').value,$('pQty').value,$('pTotal').value);
   if(r.err)return toast(r.err);toast('اتسجل والمخزون زاد');$('pQty').value='';$('pTotal').value='';renderAll()};
-window.uiAddExpense=function(){var r=addExpense($('eDate').value,$('eNote').value,$('eAmt').value);
+window.uiAddExpense=function(){var r=addExpense($('dayDate').value||today(),$('eNote').value,$('eAmt').value);
   if(r.err)return toast(r.err);toast('اتسجل');$('eNote').value='';$('eAmt').value='';renderAll()};
 
 function list(arr,fn,empty){return arr.length?arr.map(fn).join(''):'<div class="empty">'+empty+'</div>'}
@@ -323,13 +307,14 @@ window.uiCsv=function(){var q=function(s){return '"'+String(s).replace(/"/g,'""'
 
 load();
 try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist()}catch(e){}
-['dayDate','pDate','eDate'].forEach(function(k){$(k).value=today()});
+$('dayDate').value=today();
 $('dayDate').onchange=renderDay;$('sItem').onchange=saleItemChanged;$('pItem').onchange=buyItemChanged;
 $('sQty').oninput=autoTotal;$('sTotal').oninput=function(){manual=true};
-Array.prototype.forEach.call(document.querySelectorAll('nav button'),function(b){b.onclick=function(){
-  Array.prototype.forEach.call(document.querySelectorAll('nav button'),function(x){x.className=x===b?'on':''});
-  Array.prototype.forEach.call(document.querySelectorAll('section'),function(s){s.className=s.id==='t-'+b.dataset.t?'on':''});
-  window.scrollTo(0,0)}});
+function showTab(t){
+  Array.prototype.forEach.call(document.querySelectorAll('nav button'),function(x){x.className=x.dataset.t===t?'on':''});
+  Array.prototype.forEach.call(document.querySelectorAll('section'),function(s){s.className=s.id==='t-'+t?'on':''});
+  if(t==='rep')renderReport();window.scrollTo(0,0)}
+Array.prototype.forEach.call(document.querySelectorAll('nav button'),function(b){b.onclick=function(){showTab(b.dataset.t)}});
 renderAll();
 })();}
 </script>
