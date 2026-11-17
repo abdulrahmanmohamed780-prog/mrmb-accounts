@@ -108,6 +108,7 @@ section{display:none}section.on{display:block}
     </div>
     <label>نبّهني لما الرصيد يقل عن</label><input id="iLow" inputmode="decimal">
     <button class="main" onclick="uiSaveItem()">حفظ الصنف</button>
+    <button id="menuBtn" style="width:100%;margin-top:8px" onclick="uiImportMenu()">إضافة كل أصناف المنيو مرة واحدة</button>
     <button id="iCancel" style="display:none;width:100%;margin-top:8px" onclick="uiResetItem()">إلغاء التعديل</button>
   </details>
 </section>
@@ -221,6 +222,10 @@ function report(from,to){
   r.top.sort(function(a,b){return b.total-a.total});return r}
 function stockValue(){var v=0;db.items.forEach(function(i){v+=Math.max(i.stock,0)*i.cost});return r2(v)}
 
+var MENU=[["بن سادة فاتح", 700], ["بن سادة وسط", 800], ["بن سادة غامق", 900], ["بن محوج فاخر فاتح", 800], ["بن محوج فاخر وسط", 900], ["بن محوج فاخر غامق", 1000], ["بن فرنساوي بندق", 600], ["بن فرنساوي شوكولاتة", 600], ["بن فرنساوي فانيليا", 600], ["بن فرنساوي كراميل", 600], ["بن كولومبي وسط", 1400], ["بن برازيلي وسط", 1200], ["توليفة إسبريسو أرابيكا", 1200], ["بن إسبريسو اقتصادي", 800], ["بن إثيوبي وسط", 1000], ["نسكافيه بلاك سادة", 1400], ["خلطة نسكافيه 2×1", 700], ["نسكافيه 3×1 بالنكهات", 800], ["خلطة نسكافيه 3×1 سادة", 600]];
+function importMenu(){var n=0,have={};db.items.forEach(function(i){have[i.name]=true});
+  MENU.forEach(function(m){if(have[m[0]])return;db.items.push({id:uid(),name:m[0],unit:'kg',price:m[1],stock:0,cost:0,low:0});n++});
+  if(n){db.dirty=true;save()}return n}
 /* ---------- google sheet sync ---------- */
 var SKEY='mrmb_sync_url',syncBusy=false,syncErr='',onSync=function(){};
 function syncUrl(){try{return (typeof localStorage!=='undefined'&&localStorage.getItem(SKEY))||''}catch(e){return ''}}
@@ -254,12 +259,12 @@ var CRCT=null;
 function crc32(u){var c,n,k;if(!CRCT){CRCT=[];for(n=0;n<256;n++){c=n;for(k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;CRCT[n]=c>>>0}}
   c=0xFFFFFFFF;for(var i=0;i<u.length;i++)c=CRCT[(c^u[i])&255]^(c>>>8);return (c^0xFFFFFFFF)>>>0}
 function zipStore(files){
-  var enc=new TextEncoder(),parts=[],cd=[],off=0;
+  var enc=new TextEncoder(),parts=[],cd=[],off=0,dt=new Date(),ZT=(dt.getHours()<<11)|(dt.getMinutes()<<5)|(dt.getSeconds()>>1),ZD=((dt.getFullYear()-1980)<<9)|((dt.getMonth()+1)<<5)|dt.getDate();
   files.forEach(function(f){var nm=enc.encode(f.name),d=enc.encode(f.text),crc=crc32(d);
-    var h=new DataView(new ArrayBuffer(30));h.setUint32(0,0x04034b50,true);h.setUint16(4,20,true);h.setUint16(6,0x0800,true);h.setUint16(12,0x21,true);
+    var h=new DataView(new ArrayBuffer(30));h.setUint32(0,0x04034b50,true);h.setUint16(4,20,true);h.setUint16(6,0x0800,true);h.setUint16(10,ZT,true);h.setUint16(12,ZD,true);
     h.setUint32(14,crc,true);h.setUint32(18,d.length,true);h.setUint32(22,d.length,true);h.setUint16(26,nm.length,true);
     parts.push(new Uint8Array(h.buffer),nm,d);
-    var c=new DataView(new ArrayBuffer(46));c.setUint32(0,0x02014b50,true);c.setUint16(4,20,true);c.setUint16(6,20,true);c.setUint16(8,0x0800,true);c.setUint16(14,0x21,true);
+    var c=new DataView(new ArrayBuffer(46));c.setUint32(0,0x02014b50,true);c.setUint16(4,20,true);c.setUint16(6,20,true);c.setUint16(8,0x0800,true);c.setUint16(12,ZT,true);c.setUint16(14,ZD,true);
     c.setUint32(16,crc,true);c.setUint32(20,d.length,true);c.setUint32(24,d.length,true);c.setUint16(28,nm.length,true);c.setUint32(42,off,true);
     cd.push(new Uint8Array(c.buffer),nm);off+=30+nm.length+d.length});
   var cdLen=0;cd.forEach(function(p){cdLen+=p.length});
@@ -267,13 +272,17 @@ function zipStore(files){
   var all=parts.concat(cd,[new Uint8Array(e.buffer)]),len=0;all.forEach(function(p){len+=p.length});
   var out=new Uint8Array(len),o=0;all.forEach(function(p){out.set(p,o);o+=p.length});return out}
 function xesc(s){return String(s).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+var SST=null;
+function sstIdx(v){v=String(v);if(!(v in SST.map)){SST.map[v]=SST.list.length;SST.list.push(v)}return SST.map[v]}
+function colName(j){var s='';j++;while(j>0){var m=(j-1)%26;s=String.fromCharCode(65+m)+s;j=Math.floor((j-1)/26)}return s}
 function sheetXml(rows){
-  var x='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0" rightToLeft="1"/></sheetViews><cols><col min="1" max="8" width="18" customWidth="1"/></cols><sheetData>';
+  var maxC=1;rows.forEach(function(r){maxC=Math.max(maxC,r.length)});
+  var x='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><dimension ref="A1:'+colName(maxC-1)+Math.max(rows.length,1)+'"/><sheetViews><sheetView rightToLeft="1" workbookViewId="0"/></sheetViews><sheetFormatPr defaultRowHeight="15"/><cols><col min="1" max="'+maxC+'" width="18" customWidth="1"/></cols><sheetData>';
   rows.forEach(function(r,i){x+='<row r="'+(i+1)+'">';
-    r.forEach(function(v,j){if(v===''||v==null)return;var ref=String.fromCharCode(65+j)+(i+1),s=r.b?' s="1"':'';
-      x+=typeof v==='number'?'<c r="'+ref+'"'+s+'><v>'+v+'</v></c>':'<c r="'+ref+'"'+s+' t="inlineStr"><is><t xml:space="preserve">'+xesc(v)+'</t></is></c>'});
+    r.forEach(function(v,j){if(v===''||v==null)return;var ref=colName(j)+(i+1),s=r.b?' s="1"':'';
+      x+=typeof v==='number'?'<c r="'+ref+'"'+s+'><v>'+v+'</v></c>':'<c r="'+ref+'"'+s+' t="s"><v>'+sstIdx(v)+'</v></c>'});
     x+='</row>'});
-  return x+'</sheetData></worksheet>'}
+  return x+'</sheetData><pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/></worksheet>'}
 function hdr(a){a.b=true;return a}
 function unitTxt(u){return u==='pc'?'قطعة':'كجم'}
 function xlsxSheets(){
@@ -295,19 +304,27 @@ function xlsxSheets(){
     {name:'المخزون',rows:[hdr(['الصنف','الوحدة','الرصيد','سعر البيع','التكلفة','قيمة الرصيد'])].concat(db.items.map(function(i){return [i.name,unitTxt(i.unit),i.stock,i.price,i.cost,r2(Math.max(i.stock,0)*i.cost)]}))}
   ]}
 function buildXlsx(){
-  var sh=xlsxSheets(),M='http://schemas.openxmlformats.org/spreadsheetml/2006/main',R='http://schemas.openxmlformats.org/officeDocument/2006/relationships',P='http://schemas.openxmlformats.org/package/2006/relationships',X='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
-  var ct=X+'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>';
-  var wb=X+'<workbook xmlns="'+M+'" xmlns:r="'+R+'"><bookViews><workbookView/></bookViews><sheets>',rel=X+'<Relationships xmlns="'+P+'">',files=[];
+  SST={map:{},list:[]};
+  var sh=xlsxSheets(),M='http://schemas.openxmlformats.org/spreadsheetml/2006/main',R='http://schemas.openxmlformats.org/officeDocument/2006/relationships',P='http://schemas.openxmlformats.org/package/2006/relationships',X='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
+  var files=[],ct=X+'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>';
+  var wb=X+'<workbook xmlns="'+M+'" xmlns:r="'+R+'"><bookViews><workbookView xWindow="0" yWindow="0" windowWidth="16000" windowHeight="9000" activeTab="0"/></bookViews><sheets>',rel=X+'<Relationships xmlns="'+P+'">';
   sh.forEach(function(s,i){var n=i+1;
     ct+='<Override PartName="/xl/worksheets/sheet'+n+'.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
     wb+='<sheet name="'+xesc(s.name)+'" sheetId="'+n+'" r:id="rId'+n+'"/>';
     rel+='<Relationship Id="rId'+n+'" Type="'+R+'/worksheet" Target="worksheets/sheet'+n+'.xml"/>';
     files.push({name:'xl/worksheets/sheet'+n+'.xml',text:sheetXml(s.rows)})});
-  rel+='<Relationship Id="rId'+(sh.length+1)+'" Type="'+R+'/styles" Target="styles.xml"/></Relationships>';
-  var st=X+'<styleSheet xmlns="'+M+'"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs></styleSheet>';
+  var k=sh.length;
+  rel+='<Relationship Id="rId'+(k+1)+'" Type="'+R+'/styles" Target="styles.xml"/><Relationship Id="rId'+(k+2)+'" Type="'+R+'/sharedStrings" Target="sharedStrings.xml"/></Relationships>';
+  var sst=X+'<sst xmlns="'+M+'" count="'+SST.list.length+'" uniqueCount="'+SST.list.length+'">'+SST.list.map(function(t){return '<si><t xml:space="preserve">'+xesc(t)+'</t></si>'}).join('')+'</sst>';
+  var st=X+'<styleSheet xmlns="'+M+'"><fonts count="2"><font><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/></font><font><b/><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles><dxfs count="0"/><tableStyles count="0" defaultTableStyle="TableStyleMedium2" defaultPivotStyle="PivotStyleLight16"/></styleSheet>';
+  var now=new Date().toISOString().replace(/\.\d+Z$/,'Z');
+  var core=X+'<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>Mr M.B</dc:title><dc:creator>Mr M.B</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">'+now+'</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">'+now+'</dcterms:modified></cp:coreProperties>';
+  var app=X+'<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>Microsoft Excel</Application></Properties>';
   return zipStore([{name:'[Content_Types].xml',text:ct+'</Types>'},
-    {name:'_rels/.rels',text:X+'<Relationships xmlns="'+P+'"><Relationship Id="rId1" Type="'+R+'/officeDocument" Target="xl/workbook.xml"/></Relationships>'},
-    {name:'xl/workbook.xml',text:wb+'</sheets></workbook>'},{name:'xl/_rels/workbook.xml.rels',text:rel},{name:'xl/styles.xml',text:st}].concat(files))}
+    {name:'_rels/.rels',text:X+'<Relationships xmlns="'+P+'"><Relationship Id="rId1" Type="'+R+'/officeDocument" Target="xl/workbook.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="'+R+'/extended-properties" Target="docProps/app.xml"/></Relationships>'},
+    {name:'docProps/core.xml',text:core},{name:'docProps/app.xml',text:app},
+    {name:'xl/workbook.xml',text:wb+'</sheets></workbook>'},{name:'xl/_rels/workbook.xml.rels',text:rel},
+    {name:'xl/styles.xml',text:st},{name:'xl/sharedStrings.xml',text:sst}].concat(files))}
 
 /* ---------- ui ---------- */
 if(typeof document!=='undefined'){(function(){
@@ -347,6 +364,7 @@ window.uiDelExp=function(id){if(confirm('حذف المصروف ده؟')){delExpe
 window.uiSaveItem=function(){
   var r=saveItem({id:$('iId').value,name:$('iName').value,unit:$('iUnit').value,price:$('iPrice').value,stock:$('iStock').value,cost:$('iCost').value,low:$('iLow').value});
   if(r.err)return toast(r.err);toast('اتحفظ');uiResetItem();renderAll()};
+window.uiImportMenu=function(){var n=importMenu();toast(n?'اتضاف '+n+' صنف — حط التكلفة والرصيد من "التقرير والمخزون"':'كل أصناف المنيو موجودة');renderAll()};
 window.uiResetItem=function(){['iId','iName','iPrice','iStock','iCost','iLow'].forEach(function(k){$(k).value=''});$('iUnit').value='kg';$('iTitle').textContent='صنف جديد';$('iCancel').style.display='none'};
 window.uiEditItem=function(id){var it=item(id);if(!it)return;$('iId').value=it.id;$('iName').value=it.name;$('iUnit').value=it.unit;$('iPrice').value=it.price;$('iStock').value=it.stock;$('iCost').value=it.cost;$('iLow').value=it.low||'';
   $('iTitle').textContent='تعديل: '+it.name;$('iCancel').style.display='block';showTab('day');$('dItem').open=true;$('dItem').scrollIntoView()};
