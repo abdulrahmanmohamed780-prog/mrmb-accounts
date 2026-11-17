@@ -121,7 +121,7 @@ section{display:none}section.on{display:block}
       <div class="hint" id="iCupCost"></div>
     </div>
     <button class="main" onclick="uiSaveItem()">حفظ الصنف</button>
-    <button id="menuBtn" style="width:100%;margin-top:8px" onclick="uiImportMenu()">إضافة كل أصناف المنيو مرة واحدة</button>
+    <button id="menuBtn" style="width:100%;margin-top:8px" onclick="uiImportMenu()">رجّع أصناف المنيو اللي اتمسحت</button>
     <button id="iCancel" style="display:none;width:100%;margin-top:8px" onclick="uiResetItem()">إلغاء التعديل</button>
   </details>
 </section>
@@ -400,8 +400,9 @@ function saleItemChanged(){
   var it=item($('sItem').value),q=$('sQuick');manual=false;$('sQty').value='';$('sTotal').value='';
   if(!it){$('sStock').textContent='';q.innerHTML='';return}
   var pc=it.unit!=='kg';$('sQtyL').textContent=isCup(it)?'عدد الكوبايات':pc?'العدد':'الوزن (جرام)';
-  if(isCup(it))$('sStock').innerHTML='بتسحب: '+esc(recipeTxt(it))+' · تكلفة الكوباية '+money(cupCost(it))+' · سعرها '+(it.price?money(it.price):'<b class="warn">مش متحدد</b>');
-  else $('sStock').innerHTML='الرصيد: <b class="'+(it.stock<=0||(it.low>0&&it.stock<=it.low)?'warn':'ok')+'">'+qtyTxt(it.stock,it.unit)+'</b> · سعر '+(pc?'القطعة':'الكيلو')+': '+(it.price?money(it.price):'<b class="warn">مش متحدد</b>');
+  var np=it.price?'':'<br><span class="warn">مفيش سعر لسه — اكتب السعر وهيتحفظ للصنف</span>';
+  if(isCup(it))$('sStock').innerHTML='بتسحب: '+esc(recipeTxt(it))+' · تكلفة الكوباية '+money(cupCost(it))+' · سعرها '+(it.price?money(it.price):'<b class="warn">مش متحدد</b>')+np;
+  else $('sStock').innerHTML='الرصيد: <b class="'+(it.stock<=0||(it.low>0&&it.stock<=it.low)?'warn':'ok')+'">'+qtyTxt(it.stock,it.unit)+'</b> · سعر '+(pc?'القطعة':'الكيلو')+': '+(it.price?money(it.price):'<b class="warn">مش متحدد</b>')+np;
   var opts=pc?[1,2,3,4]:[125,250,500,1000];
   q.innerHTML=opts.map(function(g){return '<button type="button" onclick="uiQuick('+g+')">'+(pc?g:(g===1000?'كيلو':g+' جم'))+'</button>'}).join('')}
 function buyItemChanged(){var it=item($('pItem').value);$('pQtyL').textContent=it&&it.unit==='pc'?'الكمية (عدد)':'الكمية (كيلو)'}
@@ -410,8 +411,10 @@ function autoTotal(){if(manual)return;var it=item($('sItem').value);if(!it)retur
 window.uiQuick=function(g){$('sQty').value=g;autoTotal()};
 
 window.uiAddSale=function(){
-  var r=addSale($('dayDate').value||today(),$('sItem').value,saleQty(),$('sTotal').value);
+  var it0=item($('sItem').value),q0=saleQty();
+  var r=addSale($('dayDate').value||today(),$('sItem').value,q0,$('sTotal').value);
   if(r.err)return toast(r.err);
+  if(it0&&!it0.price&&q0>0){it0.price=r2(r.sale.total/(isCup(it0)?Math.round(q0):q0));db.dirty=true;save()}
   toast(r.negative?'اتسجل — الرصيد بقى بالسالب، راجع المخزون':r.low?'اتسجل — الرصيد قرب يخلص':'اتسجل');
   var keep=$('sItem').value;renderAll();$('sItem').value=keep;saleItemChanged();$('sQty').focus()};
 window.uiDelSale=function(id){if(confirm('حذف البيع ده؟ الكمية هترجع للمخزون.')){delSale(id);renderAll()}};
@@ -523,6 +526,7 @@ window.uiExcel=function(){
   download(name,bytes,type);toast('اتنزّل ملف الإكسيل')};
 
 load();
+if((db.menuV||0)<1){var added=importMenu();db.menuV=1;save(true);if(added)setTimeout(function(){toast('اتضافت أصناف المنيو والمشروبات ('+added+' صنف) — حط أسعارها براحتك')},400)}
 try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist()}catch(e){}
 $('dayDate').value=today();
 $('iUnit').onchange=unitForm;$('iExtra').oninput=cupHint;$('iPrice').addEventListener('input',function(){if($('iUnit').value==='cup')cupHint()});
