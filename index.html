@@ -89,6 +89,10 @@ section{display:none}section.on{display:block}
     <label>البيان</label><input id="eNote" list="eNotes" autocomplete="off">
     <datalist id="eNotes"><option>إيجار</option><option>كهرباء</option><option>مرتبات</option><option>أكياس وتعبئة</option><option>نقل</option><option>صيانة</option></datalist>
     <label>المبلغ (جنيه)</label><input id="eAmt" inputmode="decimal">
+    <label>يتحمّل على</label>
+    <select id="eSpread"><option value="1">اليوم ده بس (مصروف عادي)</option><option value="30">شهر — زي الإيجار والمرتبات</option><option value="365">سنة — زي ماكينة الإسبريسو</option><option value="custom">عدد أيام أحدده</option></select>
+    <div id="eDaysBox" style="display:none"><label>عدد الأيام</label><input id="eDays" inputmode="numeric"></div>
+    <div class="hint" id="eHint"></div>
     <button class="main" onclick="uiAddExpense()">تسجيل المصروف</button>
     <h3>آخر المصروفات</h3>
     <div id="expList"></div>
@@ -99,14 +103,23 @@ section{display:none}section.on{display:block}
     <input type="hidden" id="iId">
     <label>اسم الصنف</label><input id="iName" autocomplete="off">
     <div class="row">
-      <div><label>الوحدة</label><select id="iUnit"><option value="kg">بالكيلو</option><option value="pc">بالقطعة</option></select></div>
-      <div><label>سعر البيع (للكيلو/القطعة)</label><input id="iPrice" inputmode="decimal"></div>
+      <div><label>النوع</label><select id="iUnit"><option value="kg">بالكيلو (بن وخلطات)</option><option value="pc">بالقطعة (مياه، كانز...)</option><option value="cup">مشروب بالكوباية</option></select></div>
+      <div><label id="iPriceL">سعر بيع الكيلو</label><input id="iPrice" inputmode="decimal"></div>
     </div>
-    <div class="row">
-      <div><label>الرصيد الحالي (كيلو/قطعة)</label><input id="iStock" inputmode="decimal"></div>
-      <div><label>تكلفة الكيلو/القطعة</label><input id="iCost" inputmode="decimal"></div>
+    <div id="iStockBox">
+      <div class="row">
+        <div><label id="iStockL">الرصيد الحالي (كيلو)</label><input id="iStock" inputmode="decimal"></div>
+        <div><label id="iCostL">تكلفة الكيلو</label><input id="iCost" inputmode="decimal"></div>
+      </div>
+      <label>نبّهني لما الرصيد يقل عن</label><input id="iLow" inputmode="decimal">
     </div>
-    <label>نبّهني لما الرصيد يقل عن</label><input id="iLow" inputmode="decimal">
+    <div id="iCupBox" style="display:none">
+      <h3 style="margin-top:12px">الكوباية بتسحب من البن</h3>
+      <div id="iRecipe"></div>
+      <button type="button" class="sm" style="margin-top:6px" onclick="uiAddPart()">+ إضافة مكوّن</button>
+      <label>تكلفة إضافية للكوباية (لبن، كوباية، سكر...)</label><input id="iExtra" inputmode="decimal">
+      <div class="hint" id="iCupCost"></div>
+    </div>
     <button class="main" onclick="uiSaveItem()">حفظ الصنف</button>
     <button id="menuBtn" style="width:100%;margin-top:8px" onclick="uiImportMenu()">إضافة كل أصناف المنيو مرة واحدة</button>
     <button id="iCancel" style="display:none;width:100%;margin-top:8px" onclick="uiResetItem()">إلغاء التعديل</button>
@@ -178,22 +191,38 @@ function today(){return iso(new Date())}
 function item(id){for(var i=0;i<db.items.length;i++)if(db.items[i].id===id)return db.items[i];return null}
 
 /* ---------- logic ---------- */
+function isCup(it){return it&&it.unit==='cup'}
+function cupCost(it){var c=num(it.extra);(it.recipe||[]).forEach(function(p){var b=item(p.itemId);if(b)c+=b.cost*num(p.g)/1000});return r2(c)}
+function recipeTxt(it){var a=(it.recipe||[]).map(function(p){var b=item(p.itemId);return b?num(p.g)+' جم '+b.name:null}).filter(Boolean);return a.length?a.join(' + '):'من غير بن'}
 function saveItem(o){
   var name=String(o.name||'').trim();if(!name)return {err:'اكتب اسم الصنف'};
+  for(var i=0;i<db.items.length;i++)if(db.items[i].name===name&&db.items[i].id!==o.id)return {err:'فيه صنف بنفس الاسم'};
   var it=o.id?item(o.id):null;
   if(!it){it={id:uid()};db.items.push(it)}
-  it.name=name;it.unit=o.unit==='pc'?'pc':'kg';it.price=r2(num(o.price));
-  it.stock=r3(num(o.stock));it.cost=r2(num(o.cost));it.low=r3(num(o.low));
+  it.name=name;it.unit=o.unit==='pc'||o.unit==='cup'?o.unit:'kg';it.price=r2(num(o.price));
+  if(it.unit==='cup'){it.stock=0;it.low=0;it.extra=r2(num(o.extra));
+    it.recipe=(o.recipe||[]).filter(function(p){return item(p.itemId)&&num(p.g)>0&&p.itemId!==it.id}).map(function(p){return {itemId:p.itemId,g:r3(num(p.g))}});
+    it.cost=cupCost(it)}
+  else{it.stock=r3(num(o.stock));it.cost=r2(num(o.cost));it.low=r3(num(o.low));delete it.recipe;delete it.extra}
+  refreshCupCosts();
   db.dirty=true;save();return {item:it}}
 function addSale(date,itemId,qty,total){
   var it=item(itemId);if(!it)return {err:'اختار الصنف'};
   qty=r3(num(qty));total=r2(num(total));
   if(qty<=0)return {err:'اكتب الكمية'};if(total<=0)return {err:'اكتب السعر'};
+  if(isCup(it)){qty=Math.round(qty);if(qty<1)return {err:'اكتب عدد الكوبايات'};
+    var parts=[],neg=false,low=false;
+    (it.recipe||[]).forEach(function(p){var b=item(p.itemId);if(!b)return;var q=r3(num(p.g)/1000*qty);b.stock=r3(b.stock-q);parts.push({itemId:b.id,qty:q});
+      if(b.stock<0)neg=true;else if(b.low>0&&b.stock<=b.low)low=true});
+    var c={id:uid(),date:date||today(),itemId:it.id,name:it.name,unit:'cup',qty:qty,total:total,cost:r2(cupCost(it)*qty),parts:parts};
+    db.sales.push(c);qAdd('sales',c.id,saleRow(c));save();return {sale:c,negative:neg,low:low}}
   var s={id:uid(),date:date||today(),itemId:it.id,name:it.name,unit:it.unit,qty:qty,total:total,cost:r2(it.cost*qty)};
   db.sales.push(s);it.stock=r3(it.stock-qty);qAdd('sales',s.id,saleRow(s));save();
   return {sale:s,negative:it.stock<0,low:it.low>0&&it.stock<=it.low}}
 function delSale(id){for(var i=0;i<db.sales.length;i++)if(db.sales[i].id===id){
-  var s=db.sales[i],it=item(s.itemId);if(it)it.stock=r3(it.stock+s.qty);db.sales.splice(i,1);qDel('sales',id);save();return true}return false}
+  var s=db.sales[i],it=item(s.itemId);
+  if(s.parts)s.parts.forEach(function(p){var b=item(p.itemId);if(b)b.stock=r3(b.stock+p.qty)});
+  else if(it&&!isCup(it))it.stock=r3(it.stock+s.qty);db.sales.splice(i,1);qDel('sales',id);save();return true}return false}
 function addPurchase(date,itemId,qty,total){
   var it=item(itemId);if(!it)return {err:'اختار الصنف'};
   qty=r3(num(qty));total=r2(num(total));
@@ -201,30 +230,54 @@ function addPurchase(date,itemId,qty,total){
   var old=Math.max(it.stock,0);
   it.cost=r2((old*it.cost+total)/(old+qty));it.stock=r3(it.stock+qty);
   var p={id:uid(),date:date||today(),itemId:it.id,name:it.name,unit:it.unit,qty:qty,total:total};
-  db.purchases.push(p);qAdd('purchases',p.id,purRow(p));save();return {purchase:p}}
+  db.purchases.push(p);refreshCupCosts();qAdd('purchases',p.id,purRow(p));save();return {purchase:p}}
 function delPurchase(id){for(var i=0;i<db.purchases.length;i++)if(db.purchases[i].id===id){
   var p=db.purchases[i],it=item(p.itemId);if(it)it.stock=r3(it.stock-p.qty);db.purchases.splice(i,1);qDel('purchases',id);save();return true}return false}
-function addExpense(date,note,amount){
-  note=String(note||'').trim();amount=r2(num(amount));
-  if(!note)return {err:'اكتب البيان'};if(amount<=0)return {err:'اكتب المبلغ'};
-  var e={id:uid(),date:date||today(),note:note,amount:amount};db.expenses.push(e);qAdd('expenses',e.id,expRow(e));save();return {expense:e}}
+function dnum(s){var p=String(s).split('-');return Math.round(Date.UTC(+p[0],(+p[1])-1,+p[2])/864e5)}
+function dstr(n){return new Date(n*864e5).toISOString().slice(0,10)}
+function expDays(e){var d=Math.round(num(e.days));return d>1?d:1}
+function spreadTxt(d){return d<=1?'مرة واحدة':d===30?'على شهر':d===365?'على سنة':'على '+d+' يوم'}
+/* نصيب المصروف من الفترة [fromN..toN] (أرقام أيام)، مقصوص لحد النهارده */
+function allocExp(e,fromN,toN){var d=expDays(e),s=dnum(e.date),en=s+d-1,t=dnum(today());
+  if(d>1)en=Math.min(en,Math.max(t,s));var lo=Math.max(s,fromN),hi=Math.min(en,toN);return hi<lo?0:e.amount*(hi-lo+1)/d}
+/* يوزّع المصروفات على الأيام: fn(dayString, share) */
+function eachExpDay(fn){var t=dnum(today());db.expenses.forEach(function(e){var d=expDays(e),s=dnum(e.date),en=d>1?Math.min(s+d-1,Math.max(t,s)):s;
+  for(var x=s;x<=en;x++)fn(dstr(x),e.amount/d)})}
+function addExpense(date,note,amount,days){
+  note=String(note||'').trim();amount=r2(num(amount));days=Math.round(num(days));if(days<1)days=1;
+  if(!note)return {err:'اكتب البيان'};if(amount<=0)return {err:'اكتب المبلغ'};if(days>3650)return {err:'عدد الأيام كبير أوي'};
+  var e={id:uid(),date:date||today(),note:note,amount:amount,days:days};db.expenses.push(e);qAdd('expenses',e.id,expRow(e));save();return {expense:e}}
 function delExpense(id){for(var i=0;i<db.expenses.length;i++)if(db.expenses[i].id===id){db.expenses.splice(i,1);qDel('expenses',id);save();return true}return false}
 function report(from,to){
   function inR(x){return (!from||x.date>=from)&&(!to||x.date<=to)}
-  var r={sales:0,cogs:0,expenses:0,purchases:0,count:0,top:[]},m={};
+  var r={sales:0,cogs:0,expenses:0,paid:0,purchases:0,count:0,top:[]},m={};
+  var fN=from?dnum(from):-1e9,tN=to?dnum(to):dnum(today());
   db.sales.filter(inR).forEach(function(s){r.sales+=s.total;r.cogs+=s.cost;r.count++;
     var k=s.itemId;if(!m[k])m[k]={name:s.name,unit:s.unit,qty:0,total:0};m[k].qty+=s.qty;m[k].total+=s.total});
-  db.expenses.filter(inR).forEach(function(e){r.expenses+=e.amount});
+  db.expenses.forEach(function(e){r.expenses+=allocExp(e,fN,tN);if(inR(e))r.paid+=e.amount});
   db.purchases.filter(inR).forEach(function(p){r.purchases+=p.total});
-  r.sales=r2(r.sales);r.cogs=r2(r.cogs);r.expenses=r2(r.expenses);r.purchases=r2(r.purchases);
+  r.sales=r2(r.sales);r.cogs=r2(r.cogs);r.expenses=r2(r.expenses);r.paid=r2(r.paid);r.purchases=r2(r.purchases);
   r.gross=r2(r.sales-r.cogs);r.net=r2(r.gross-r.expenses);
   for(var k in m){m[k].qty=r3(m[k].qty);m[k].total=r2(m[k].total);r.top.push(m[k])}
   r.top.sort(function(a,b){return b.total-a.total});return r}
-function stockValue(){var v=0;db.items.forEach(function(i){v+=Math.max(i.stock,0)*i.cost});return r2(v)}
+function stockValue(){var v=0;db.items.forEach(function(i){if(!isCup(i))v+=Math.max(i.stock,0)*i.cost});return r2(v)}
+function refreshCupCosts(){db.items.forEach(function(i){if(isCup(i))i.cost=cupCost(i)})}
 
+var MENU_CUP=[["قهوة تركي",[["بن سادة وسط",7]]],["قهوة تركي دبل",[["بن سادة وسط",14]]],["قهوة فرنساوي",[["بن فرنساوي بندق",10]]],
+ ["إسبريسو سنجل",[["توليفة إسبريسو أرابيكا",9]]],["إسبريسو دبل",[["توليفة إسبريسو أرابيكا",18]]],["أمريكانو",[["توليفة إسبريسو أرابيكا",18]]],
+ ["كابتشينو",[["توليفة إسبريسو أرابيكا",18]]],["لاتيه",[["توليفة إسبريسو أرابيكا",18]]],["فلات وايت",[["توليفة إسبريسو أرابيكا",18]]],
+ ["موكا",[["توليفة إسبريسو أرابيكا",18]]],["ماكياتو",[["توليفة إسبريسو أرابيكا",18]]],["كورتادو",[["توليفة إسبريسو أرابيكا",18]]],
+ ["آيس لاتيه",[["توليفة إسبريسو أرابيكا",18]]],["آيس أمريكانو",[["توليفة إسبريسو أرابيكا",18]]],["آيس موكا",[["توليفة إسبريسو أرابيكا",18]]],
+ ["نسكافيه بلاك",[["نسكافيه بلاك سادة",2]]],["نسكافيه 3×1",[["خلطة نسكافيه 3×1 سادة",20]]],["شاي",[]],["شاي بلبن",[]]];
+var MENU_PC=["مياه","كانز","عصير","عصير سن توب","بست","ريد بول"];
 var MENU=[["بن سادة فاتح", 700], ["بن سادة وسط", 800], ["بن سادة غامق", 900], ["بن محوج فاخر فاتح", 800], ["بن محوج فاخر وسط", 900], ["بن محوج فاخر غامق", 1000], ["بن فرنساوي بندق", 600], ["بن فرنساوي شوكولاتة", 600], ["بن فرنساوي فانيليا", 600], ["بن فرنساوي كراميل", 600], ["بن كولومبي وسط", 1400], ["بن برازيلي وسط", 1200], ["توليفة إسبريسو أرابيكا", 1200], ["بن إسبريسو اقتصادي", 800], ["بن إثيوبي وسط", 1000], ["نسكافيه بلاك سادة", 1400], ["خلطة نسكافيه 2×1", 700], ["نسكافيه 3×1 بالنكهات", 800], ["خلطة نسكافيه 3×1 سادة", 600]];
 function importMenu(){var n=0,have={};db.items.forEach(function(i){have[i.name]=true});
   MENU.forEach(function(m){if(have[m[0]])return;db.items.push({id:uid(),name:m[0],unit:'kg',price:m[1],stock:0,cost:0,low:0});n++});
+  MENU_PC.forEach(function(m){if(have[m])return;db.items.push({id:uid(),name:m,unit:'pc',price:0,stock:0,cost:0,low:0});n++});
+  var byName={};db.items.forEach(function(i){byName[i.name]=i});
+  MENU_CUP.forEach(function(m){if(have[m[0]])return;
+    var c={id:uid(),name:m[0],unit:'cup',price:0,stock:0,cost:0,low:0,extra:0,recipe:m[1].filter(function(p){return byName[p[0]]}).map(function(p){return {itemId:byName[p[0]].id,g:p[1]}})};
+    c.cost=cupCost(c);db.items.push(c);n++});
   if(n){db.dirty=true;save()}return n}
 /* ---------- google sheet sync ---------- */
 var SKEY='mrmb_sync_url',syncBusy=false,syncErr='',onSync=function(){};
@@ -233,8 +286,8 @@ function qAdd(sheet,id,row){if(syncUrl())db.queue.push({op:'add',sheet:sheet,id:
 function qDel(sheet,id){if(syncUrl())db.queue.push({op:'del',sheet:sheet,id:id});db.dirty=true}
 function saleRow(s){return [s.date,s.name,s.qty,unitTxt(s.unit),s.total,s.cost,r2(s.total-s.cost)]}
 function purRow(p){return [p.date,p.name,p.qty,unitTxt(p.unit),p.total]}
-function expRow(e){return [e.date,e.note,e.amount]}
-function itemRows(){return db.items.map(function(i){return [i.name,unitTxt(i.unit),i.stock,i.price,i.cost,r2(Math.max(i.stock,0)*i.cost)]})}
+function expRow(e){return [e.date,e.note,e.amount,expDays(e)]}
+function itemRows(){return db.items.map(function(i){return isCup(i)?[i.name,unitTxt(i.unit),'',i.price,i.cost,0]:[i.name,unitTxt(i.unit),i.stock,i.price,i.cost,r2(Math.max(i.stock,0)*i.cost)]})}
 function fullResync(){
   db.queue=[{op:'reset'}]
     .concat(db.sales.map(function(s){return {op:'add',sheet:'sales',id:s.id,row:saleRow(s)}}))
@@ -284,15 +337,15 @@ function sheetXml(rows){
     x+='</row>'});
   return x+'</sheetData><pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/></worksheet>'}
 function hdr(a){a.b=true;return a}
-function unitTxt(u){return u==='pc'?'قطعة':'كجم'}
+function unitTxt(u){return u==='pc'?'قطعة':u==='cup'?'كوباية':'كجم'}
 function xlsxSheets(){
   var all=report('',''),months={},keys;
   function mo(d){var k=String(d).slice(0,7);if(!months[k])months[k]={sales:0,cogs:0,exp:0,buy:0};return months[k]}
   db.sales.forEach(function(s){var m=mo(s.date);m.sales+=s.total;m.cogs+=s.cost});
-  db.expenses.forEach(function(e){mo(e.date).exp+=e.amount});
+  eachExpDay(function(d,a){mo(d).exp+=a});
   db.purchases.forEach(function(p){mo(p.date).buy+=p.total});
   keys=Object.keys(months).sort();
-  var sum=[hdr(['البند','القيمة (جنيه)']),['إجمالي المبيعات',all.sales],['تكلفة البضاعة المباعة',all.cogs],['مجمل الربح',all.gross],['المصروفات',all.expenses],['صافي الربح',all.net],['إجمالي المشتريات',all.purchases],['قيمة المخزون الحالي',stockValue()],['تاريخ التقرير',today()],[],
+  var sum=[hdr(['البند','القيمة (جنيه)']),['إجمالي المبيعات',all.sales],['تكلفة البضاعة المباعة',all.cogs],['مجمل الربح',all.gross],['المصروفات (محمّلة لحد النهارده)',all.expenses],['المصروفات المدفوعة',all.paid],['صافي الربح',all.net],['إجمالي المشتريات',all.purchases],['قيمة المخزون الحالي',stockValue()],['تاريخ التقرير',today()],[],
     hdr(['الشهر','المبيعات','تكلفة البضاعة','مجمل الربح','المصروفات','صافي الربح','المشتريات'])];
   keys.forEach(function(k){var m=months[k],g=r2(m.sales-m.cogs);sum.push([k,r2(m.sales),r2(m.cogs),g,r2(m.exp),r2(g-m.exp),r2(m.buy)])});
   function byDate(a,b){return a.date<b.date?-1:a.date>b.date?1:0}
@@ -300,8 +353,8 @@ function xlsxSheets(){
     {name:'الملخص',rows:sum},
     {name:'المبيعات',rows:[hdr(['التاريخ','الصنف','الكمية','الوحدة','السعر','التكلفة','الربح'])].concat(db.sales.slice().sort(byDate).map(function(s){return [s.date,s.name,s.qty,unitTxt(s.unit),s.total,s.cost,r2(s.total-s.cost)]}))},
     {name:'المشتريات',rows:[hdr(['التاريخ','الصنف','الكمية','الوحدة','المدفوع'])].concat(db.purchases.slice().sort(byDate).map(function(p){return [p.date,p.name,p.qty,unitTxt(p.unit),p.total]}))},
-    {name:'المصروفات',rows:[hdr(['التاريخ','البيان','المبلغ'])].concat(db.expenses.slice().sort(byDate).map(function(e){return [e.date,e.note,e.amount]}))},
-    {name:'المخزون',rows:[hdr(['الصنف','الوحدة','الرصيد','سعر البيع','التكلفة','قيمة الرصيد'])].concat(db.items.map(function(i){return [i.name,unitTxt(i.unit),i.stock,i.price,i.cost,r2(Math.max(i.stock,0)*i.cost)]}))}
+    {name:'المصروفات',rows:[hdr(['التاريخ','البيان','المبلغ','التوزيع','عدد الأيام','نصيب اليوم'])].concat(db.expenses.slice().sort(byDate).map(function(e){var d=expDays(e);return [e.date,e.note,e.amount,spreadTxt(d),d,r2(e.amount/d)]}))},
+    {name:'المخزون',rows:[hdr(['الصنف','الوحدة','الرصيد','سعر البيع','التكلفة','قيمة الرصيد'])].concat(itemRows())}
   ]}
 function buildXlsx(){
   SST={map:{},list:[]};
@@ -331,21 +384,25 @@ if(typeof document!=='undefined'){(function(){
 var $=function(id){return document.getElementById(id)};
 function esc(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function money(n){return Number(n).toLocaleString('en',{maximumFractionDigits:2})+' ج'}
-function qtyTxt(q,u){if(u==='pc')return r3(q)+' قطعة';var a=Math.abs(q);return a<1?Math.round(q*1000)+' جم':r3(q)+' كجم'}
+function qtyTxt(q,u){if(u==='cup')return r3(q)+' كوباية';if(u==='pc')return r3(q)+' قطعة';var a=Math.abs(q);return a<1?Math.round(q*1000)+' جم':r3(q)+' كجم'}
 var tt;function toast(m){var t=$('toast');t.textContent=m;t.className='show';clearTimeout(tt);tt=setTimeout(function(){t.className=''},2200)}
 var manual=false;
 
+var GROUPS=[['cup','مشروبات بالكوباية'],['kg','بن وخلطات بالكيلو'],['pc','بالقطعة']];
+function optsFor(units){var out='';GROUPS.forEach(function(g){if(units.indexOf(g[0])<0)return;var its=db.items.filter(function(i){return i.unit===g[0]});
+  if(its.length)out+='<optgroup label="'+g[1]+'">'+its.map(function(i){return '<option value="'+i.id+'">'+esc(i.name)+'</option>'}).join('')+'</optgroup>'});
+  return out||'<option value="">ضيف صنف الأول</option>'}
 function fillItems(){
-  ['sItem','pItem'].forEach(function(id){var el=$(id),cur=el.value;
-    el.innerHTML=db.items.length?db.items.map(function(i){return '<option value="'+i.id+'">'+esc(i.name)+'</option>'}).join(''):'<option value="">ضيف صنف من "المخزون" الأول</option>';
-    if(cur&&item(cur))el.value=cur});
+  [['sItem',['cup','kg','pc']],['pItem',['kg','pc']]].forEach(function(x){var el=$(x[0]),cur=el.value;
+    el.innerHTML=optsFor(x[1]);if(cur&&item(cur)&&x[1].indexOf(item(cur).unit)>=0)el.value=cur});
   saleItemChanged();buyItemChanged()}
 function saleItemChanged(){
   var it=item($('sItem').value),q=$('sQuick');manual=false;$('sQty').value='';$('sTotal').value='';
   if(!it){$('sStock').textContent='';q.innerHTML='';return}
-  var pc=it.unit==='pc';$('sQtyL').textContent=pc?'العدد':'الوزن (جرام)';
-  $('sStock').innerHTML='الرصيد: <b class="'+(it.stock<=0||(it.low>0&&it.stock<=it.low)?'warn':'ok')+'">'+qtyTxt(it.stock,it.unit)+'</b> · سعر '+(pc?'القطعة':'الكيلو')+': '+money(it.price);
-  var opts=pc?[1,2,3,5]:[125,250,500,1000];
+  var pc=it.unit!=='kg';$('sQtyL').textContent=isCup(it)?'عدد الكوبايات':pc?'العدد':'الوزن (جرام)';
+  if(isCup(it))$('sStock').innerHTML='بتسحب: '+esc(recipeTxt(it))+' · تكلفة الكوباية '+money(cupCost(it))+' · سعرها '+(it.price?money(it.price):'<b class="warn">مش متحدد</b>');
+  else $('sStock').innerHTML='الرصيد: <b class="'+(it.stock<=0||(it.low>0&&it.stock<=it.low)?'warn':'ok')+'">'+qtyTxt(it.stock,it.unit)+'</b> · سعر '+(pc?'القطعة':'الكيلو')+': '+(it.price?money(it.price):'<b class="warn">مش متحدد</b>');
+  var opts=pc?[1,2,3,4]:[125,250,500,1000];
   q.innerHTML=opts.map(function(g){return '<button type="button" onclick="uiQuick('+g+')">'+(pc?g:(g===1000?'كيلو':g+' جم'))+'</button>'}).join('')}
 function buyItemChanged(){var it=item($('pItem').value);$('pQtyL').textContent=it&&it.unit==='pc'?'الكمية (عدد)':'الكمية (كيلو)'}
 function saleQty(){var it=item($('sItem').value),v=num($('sQty').value);return it&&it.unit==='kg'?v/1000:v}
@@ -361,20 +418,39 @@ window.uiDelSale=function(id){if(confirm('حذف البيع ده؟ الكمية 
 window.uiDelBuy=function(id){if(confirm('حذف الشراء ده؟ الكمية هتتخصم من المخزون.')){delPurchase(id);renderAll()}};
 window.uiDelExp=function(id){if(confirm('حذف المصروف ده؟')){delExpense(id);renderAll()}};
 
+function partRow(p){var opts=db.items.filter(function(i){return i.unit==='kg'}).map(function(i){return '<option value="'+i.id+'"'+(p&&p.itemId===i.id?' selected':'')+'>'+esc(i.name)+'</option>'}).join('');
+  return '<div class="row part" style="align-items:center;margin-top:6px"><select class="pItm" style="flex:2">'+(opts||'<option value="">ضيف بن بالكيلو الأول</option>')+'</select><input class="pG" inputmode="decimal" placeholder="جرام" value="'+(p?p.g:'')+'" style="flex:1"><button type="button" class="del" onclick="this.parentNode.remove();cupHint()">✕</button></div>'}
+window.uiAddPart=function(){$('iRecipe').insertAdjacentHTML('beforeend',partRow(null));bindParts();cupHint()};
+function bindParts(){Array.prototype.forEach.call(document.querySelectorAll('#iRecipe select,#iRecipe input'),function(x){x.oninput=x.onchange=cupHint})}
+function formRecipe(){return Array.prototype.map.call(document.querySelectorAll('#iRecipe .part'),function(r){return {itemId:r.querySelector('.pItm').value,g:num(r.querySelector('.pG').value)}})}
+function cupHint(){var c=cupCost({extra:$('iExtra').value,recipe:formRecipe()}),p=num($('iPrice').value);
+  $('iCupCost').innerHTML='تكلفة الكوباية: <b>'+money(c)+'</b>'+(p>0?' · ربحها: <b class="'+(p-c<0?'warn':'ok')+'">'+money(r2(p-c))+'</b>':'')}
+function unitForm(){var u=$('iUnit').value,cup=u==='cup';
+  $('iStockBox').style.display=cup?'none':'block';$('iCupBox').style.display=cup?'block':'none';
+  $('iPriceL').textContent=cup?'سعر الكوباية':u==='pc'?'سعر القطعة':'سعر بيع الكيلو';
+  $('iStockL').textContent=u==='pc'?'الرصيد الحالي (عدد)':'الرصيد الحالي (كيلو)';$('iCostL').textContent=u==='pc'?'تكلفة القطعة':'تكلفة الكيلو';
+  if(cup){if(!document.querySelector('#iRecipe .part'))uiAddPart();cupHint()}}
 window.uiSaveItem=function(){
-  var r=saveItem({id:$('iId').value,name:$('iName').value,unit:$('iUnit').value,price:$('iPrice').value,stock:$('iStock').value,cost:$('iCost').value,low:$('iLow').value});
+  var r=saveItem({id:$('iId').value,name:$('iName').value,unit:$('iUnit').value,price:$('iPrice').value,stock:$('iStock').value,cost:$('iCost').value,low:$('iLow').value,extra:$('iExtra').value,recipe:formRecipe()});
   if(r.err)return toast(r.err);toast('اتحفظ');uiResetItem();renderAll()};
-window.uiImportMenu=function(){var n=importMenu();toast(n?'اتضاف '+n+' صنف — حط التكلفة والرصيد من "التقرير والمخزون"':'كل أصناف المنيو موجودة');renderAll()};
-window.uiResetItem=function(){['iId','iName','iPrice','iStock','iCost','iLow'].forEach(function(k){$(k).value=''});$('iUnit').value='kg';$('iTitle').textContent='صنف جديد';$('iCancel').style.display='none'};
-window.uiEditItem=function(id){var it=item(id);if(!it)return;$('iId').value=it.id;$('iName').value=it.name;$('iUnit').value=it.unit;$('iPrice').value=it.price;$('iStock').value=it.stock;$('iCost').value=it.cost;$('iLow').value=it.low||'';
+window.uiImportMenu=function(){var n=importMenu();toast(n?'اتضاف '+n+' صنف — حط الأسعار والتكلفة والرصيد من "التقرير والمخزون"':'كل أصناف المنيو موجودة');renderAll()};
+window.uiResetItem=function(){['iId','iName','iPrice','iStock','iCost','iLow','iExtra'].forEach(function(k){$(k).value=''});$('iUnit').value='kg';$('iRecipe').innerHTML='';unitForm();$('iTitle').textContent='صنف جديد';$('iCancel').style.display='none'};
+window.uiEditItem=function(id){var it=item(id);if(!it)return;$('iId').value=it.id;$('iName').value=it.name;$('iUnit').value=it.unit;$('iPrice').value=it.price||'';$('iStock').value=it.stock;$('iCost').value=it.cost;$('iLow').value=it.low||'';
+  $('iExtra').value=it.extra||'';$('iRecipe').innerHTML=(it.recipe||[]).map(partRow).join('');bindParts();unitForm();
   $('iTitle').textContent='تعديل: '+it.name;$('iCancel').style.display='block';showTab('day');$('dItem').open=true;$('dItem').scrollIntoView()};
-window.uiDelItem=function(id){if(!confirm('حذف الصنف؟ المبيعات القديمة هتفضل في التقارير.'))return;
-  db.items=db.items.filter(function(i){return i.id!==id});db.dirty=true;save();renderAll()};
+window.uiDelItem=function(id){var used=db.items.filter(function(c){return isCup(c)&&(c.recipe||[]).some(function(p){return p.itemId===id})}).map(function(c){return c.name});
+  if(!confirm((used.length?'الصنف ده داخل في: '+used.join('، ')+'. ':'')+'حذف الصنف؟ المبيعات القديمة هتفضل في التقارير.'))return;
+  db.items=db.items.filter(function(i){return i.id!==id});refreshCupCosts();db.dirty=true;save();renderAll()};
 
 window.uiAddPurchase=function(){var r=addPurchase($('dayDate').value||today(),$('pItem').value,$('pQty').value,$('pTotal').value);
   if(r.err)return toast(r.err);toast('اتسجل والمخزون زاد');$('pQty').value='';$('pTotal').value='';renderAll()};
-window.uiAddExpense=function(){var r=addExpense($('dayDate').value||today(),$('eNote').value,$('eAmt').value);
-  if(r.err)return toast(r.err);toast('اتسجل');$('eNote').value='';$('eAmt').value='';renderAll()};
+function eSpreadDays(){var v=$('eSpread').value;return v==='custom'?Math.round(num($('eDays').value)):+v}
+function eHint(){$('eDaysBox').style.display=$('eSpread').value==='custom'?'block':'none';
+  var a=num($('eAmt').value),d=eSpreadDays();
+  $('eHint').textContent=d>1&&a>0?'هيتخصم من الربح '+money(r2(a/d))+' كل يوم لمدة '+d+' يوم من تاريخ اليوم اللي بتسجله':(d>1?'المبلغ هيتقسم على '+d+' يوم':'')}
+window.uiAddExpense=function(){var d=eSpreadDays();if($('eSpread').value==='custom'&&d<2)return toast('اكتب عدد الأيام');
+  var r=addExpense($('dayDate').value||today(),$('eNote').value,$('eAmt').value,d);
+  if(r.err)return toast(r.err);toast('اتسجل');$('eNote').value='';$('eAmt').value='';$('eDays').value='';$('eSpread').value='1';eHint();renderAll()};
 
 function list(arr,fn,empty){return arr.length?arr.map(fn).join(''):'<div class="empty">'+empty+'</div>'}
 function renderDay(){
@@ -383,11 +459,18 @@ function renderDay(){
   $('dayList').innerHTML=list(s,function(x){return '<div class="li"><div class="a"><b>'+esc(x.name)+'</b><span>'+qtyTxt(x.qty,x.unit)+'</span></div><div class="v">'+money(x.total)+'</div><button class="del" onclick="uiDelSale(\''+x.id+'\')">حذف</button></div>'},'مفيش مبيعات في اليوم ده')
     +(s.length?'<div class="total"><span>إجمالي اليوم ('+s.length+')</span><span>'+money(r2(t))+'</span></div>':'')}
 function renderStock(){
-  $('stockList').innerHTML=list(db.items,function(i){var low=i.stock<=0||(i.low>0&&i.stock<=i.low);
-    return '<div class="li"><div class="a"><b>'+esc(i.name)+'</b><span>بيع '+money(i.price)+' · تكلفة '+money(i.cost)+'</span></div><div class="v '+(low?'warn':'')+'">'+qtyTxt(i.stock,i.unit)+'</div><button class="sm" onclick="uiEditItem(\''+i.id+'\')">تعديل</button><button class="del" onclick="uiDelItem(\''+i.id+'\')">حذف</button></div>'},'لسه مفيش أصناف — ضيف أول صنف من فوق')
+  var btns=function(i){return '<button class="sm" onclick="uiEditItem(\''+i.id+'\')">تعديل</button><button class="del" onclick="uiDelItem(\''+i.id+'\')">حذف</button>'};
+  var price=function(i){return i.price?money(i.price):'<span class="warn">من غير سعر</span>'};
+  var html='';
+  [['kg','بن وخلطات بالكيلو'],['pc','بالقطعة'],['cup','مشروبات بالكوباية']].forEach(function(g){var its=db.items.filter(function(i){return i.unit===g[0]});if(!its.length)return;
+    html+='<h3>'+g[1]+' ('+its.length+')</h3>'+its.map(function(i){
+      if(isCup(i))return '<div class="li"><div class="a"><b>'+esc(i.name)+'</b><span>'+price(i)+' · تكلفة '+money(cupCost(i))+' · '+esc(recipeTxt(i))+'</span></div>'+btns(i)+'</div>';
+      var low=i.stock<=0||(i.low>0&&i.stock<=i.low);
+      return '<div class="li"><div class="a"><b>'+esc(i.name)+'</b><span>بيع '+price(i)+' · تكلفة '+money(i.cost)+'</span></div><div class="v '+(low?'warn':'')+'">'+qtyTxt(i.stock,i.unit)+'</div>'+btns(i)+'</div>'}).join('')});
+  $('stockList').innerHTML=(html||'<div class="empty">لسه مفيش أصناف — ضيف أول صنف من صفحة التسجيل</div>')
     +(db.items.length?'<div class="total"><span>قيمة المخزون بالتكلفة</span><span>'+money(stockValue())+'</span></div>':'')}
 function renderBuy(){$('buyList').innerHTML=list(db.purchases.slice(-30).reverse(),function(p){return '<div class="li"><div class="a"><b>'+esc(p.name)+'</b><span>'+p.date+' · '+qtyTxt(p.qty,p.unit)+'</span></div><div class="v">'+money(p.total)+'</div><button class="del" onclick="uiDelBuy(\''+p.id+'\')">حذف</button></div>'},'مفيش مشتريات')}
-function renderExp(){$('expList').innerHTML=list(db.expenses.slice(-30).reverse(),function(e){return '<div class="li"><div class="a"><b>'+esc(e.note)+'</b><span>'+e.date+'</span></div><div class="v">'+money(e.amount)+'</div><button class="del" onclick="uiDelExp(\''+e.id+'\')">حذف</button></div>'},'مفيش مصروفات')}
+function renderExp(){$('expList').innerHTML=list(db.expenses.slice(-30).reverse(),function(e){var d=expDays(e);return '<div class="li"><div class="a"><b>'+esc(e.note)+'</b><span>'+e.date+(d>1?' · '+spreadTxt(d)+' ('+money(r2(e.amount/d))+'/يوم)':'')+'</span></div><div class="v">'+money(e.amount)+'</div><button class="del" onclick="uiDelExp(\''+e.id+'\')">حذف</button></div>'},'مفيش مصروفات')}
 window.renderReport=function(){
   var v=$('rRange').value,n=new Date(),from='',to='';
   $('rCustom').style.display=v==='custom'?'flex':'none';
@@ -401,7 +484,8 @@ window.renderReport=function(){
     +'<div class="stat"><span>المبيعات ('+r.count+' عملية)</span><b>'+money(r.sales)+'</b></div>'
     +'<div class="stat"><span>تكلفة البضاعة المباعة</span><b>'+money(r.cogs)+'</b></div>'
     +'<div class="stat"><span>مجمل الربح</span><b>'+money(r.gross)+'</b></div>'
-    +'<div class="stat"><span>المصروفات</span><b>'+money(r.expenses)+'</b></div>'
+    +'<div class="stat"><span>المصروفات المحمّلة على الفترة</span><b>'+money(r.expenses)+'</b></div>'
+    +'<div class="stat"><span>مصروفات اتدفعت في الفترة</span><b>'+money(r.paid)+'</b></div>'
     +'<div class="stat"><span>مشتريات الفترة</span><b>'+money(r.purchases)+'</b></div>'
     +'<div class="stat"><span>قيمة المخزون الحالي</span><b>'+money(stockValue())+'</b></div>';
   $('rTop').innerHTML=list(r.top,function(t){return '<div class="li"><div class="a"><b>'+esc(t.name)+'</b><span>'+qtyTxt(t.qty,t.unit)+'</span></div><div class="v">'+money(t.total)+'</div></div>'},'مفيش مبيعات في الفترة دي')};
@@ -441,6 +525,8 @@ window.uiExcel=function(){
 load();
 try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist()}catch(e){}
 $('dayDate').value=today();
+$('iUnit').onchange=unitForm;$('iExtra').oninput=cupHint;$('iPrice').addEventListener('input',function(){if($('iUnit').value==='cup')cupHint()});
+$('eSpread').onchange=eHint;$('eDays').oninput=eHint;$('eAmt').oninput=eHint;
 $('dayDate').onchange=renderDay;$('sItem').onchange=saleItemChanged;$('pItem').onchange=buyItemChanged;
 $('sQty').oninput=autoTotal;$('sTotal').oninput=function(){manual=true};
 function showTab(t){
